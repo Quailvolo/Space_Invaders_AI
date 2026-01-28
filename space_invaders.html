@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Space Invaders - AI Edition</title>
+  <style>
+    body {
+      margin: 0;
+      background: #050505;
+      color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #game-container {
+      position: relative;
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);
+      border: 2px solid #333;
+    }
+
+    canvas {
+      display: block;
+      background: #000;
+    }
+
+    #ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      font-size: 20px;
+      color: #0f0;
+      text-shadow: 2px 2px #000;
+    }
+
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    h1 {
+      color: #f00;
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+
+    .stats {
+      color: #fff;
+      margin-bottom: 20px;
+    }
+
+    .hint {
+      color: #ff0;
+      font-size: 18px;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+      50% {
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="game-container">
+    <div id="ui-layer">
+      <div>Рахунок: <span id="score">0</span></div>
+      <div>Життя: <span id="lives">3</span></div>
+      <div>Рекорд: <span id="highscore">0</span></div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="overlay">
+      <h1 id="status">GAME OVER</h1>
+      <div class="stats">Ваш результат: <span id="final-score">0</span></div>
+      <div class="hint">Натисніть ENTER щоб почати знову</div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ГРА SPACE INVADERS
+     * Згенеровано AI для домашнього завдання №5
+     */
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    const highscoreEl = document.getElementById('highscore');
+    const overlay = document.getElementById('overlay');
+    const statusEl = document.getElementById('status');
+    const finalScoreEl = document.getElementById('final-score');
+
+    // Налаштування екрану
+    canvas.width = 800;
+    canvas.height = 600;
+
+    // Стан гри
+    let score = 0;
+    let lives = 3;
+    let gameActive = true;
+    let invaders = [];
+    let bullets = [];
+    let enemyBullets = [];
+    let particles = [];
+    let keys = {};
+    let highscore = localStorage.getItem('invaders_highscore') || 0;
+    highscoreEl.innerText = highscore;
+
+    // Звуковий рушій (Web Audio API)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(freq, type, duration) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // Класи об'єктів
+    class Player {
+      constructor() {
+        this.w = 40;
+        this.h = 20;
+        this.x = canvas.width / 2 - this.w / 2;
+        this.y = canvas.height - 40;
+        this.speed = 5;
+      }
+      draw() {
+        ctx.fillStyle = '#0f0';
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+        ctx.fillRect(this.x + 15, this.y - 10, 10, 10);
+      }
+      update() {
+        if (keys['ArrowLeft'] || keys['a']) this.x -= this.speed;
+        if (keys['ArrowRight'] || keys['d']) this.x += this.speed;
+        this.x = Math.max(0, Math.min(canvas.width - this.w, this.x));
+      }
+    }
+
+    class Invader {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 35;
+        this.h = 25;
+      }
+      draw() {
+        ctx.fillStyle = '#f33';
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(this.x + 5, this.y + 5, 5, 5);
+        ctx.fillRect(this.x + 25, this.y + 5, 5, 5);
+      }
+    }
+
+    class Bullet {
+      constructor(x, y, dy, color) {
+        this.x = x;
+        this.y = y;
+        this.w = 3;
+        this.h = 15;
+        this.dy = dy;
+        this.color = color;
+      }
+      draw() {
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x, this.y, this.w, this.h);
+      }
+      update() {
+        this.y += this.dy;
+      }
+    }
+
+    const player = new Player();
+
+    function initInvaders() {
+      invaders = [];
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 10; c++) {
+          invaders.push(new Invader(100 + c * 60, 50 + r * 50));
+        }
+      }
+    }
+
+    let invaderDirection = 1;
+    let invaderSpeed = 1;
+
+    function update() {
+      if (!gameActive) return;
+
+      player.update();
+
+      // Кулі гравця
+      bullets.forEach((b, i) => {
+        b.update();
+        if (b.y < 0) bullets.splice(i, 1);
+      });
+
+      // Кулі ворогів
+      enemyBullets.forEach((b, i) => {
+        b.update();
+        if (b.y > canvas.height) enemyBullets.splice(i, 1);
+
+        // Колізія з гравцем
+        if (b.x < player.x + player.w && b.x + b.w > player.x &&
+          b.y < player.y + player.h && b.y + b.h > player.y) {
+          enemyBullets.splice(i, 1);
+          lives--;
+          playSound(150, 'sawtooth', 0.5);
+          livesEl.innerText = lives;
+          if (lives <= 0) gameOver();
+        }
+      });
+
+      // Рух загарбників
+      let edgeReached = false;
+      invaders.forEach(inv => {
+        inv.x += invaderDirection * invaderSpeed;
+        if (inv.x + inv.w > canvas.width || inv.x < 0) edgeReached = true;
+        if (inv.y + inv.h > player.y) gameOver();
+      });
+
+      if (edgeReached) {
+        invaderDirection *= -1;
+        invaders.forEach(inv => inv.y += 20);
+      }
+
+      // Ворожа стрільба
+      if (Math.random() < 0.02 && invaders.length > 0) {
+        const randomInv = invaders[Math.floor(Math.random() * invaders.length)];
+        enemyBullets.push(new Bullet(randomInv.x + randomInv.w / 2, randomInv.y + randomInv.h, 4, '#ff0'));
+      }
+
+      // Колізія: куля -> ворог
+      bullets.forEach((b, bi) => {
+        invaders.forEach((inv, ii) => {
+          if (b.x < inv.x + inv.w && b.x + b.w > inv.x &&
+            b.y < inv.y + inv.h && b.y + b.h > inv.y) {
+            invaders.splice(ii, 1);
+            bullets.splice(bi, 1);
+            score += 10;
+            scoreEl.innerText = score;
+            playSound(400, 'square', 0.1);
+            invaderSpeed += 0.05; // Прискорюємо гру
+            if (invaders.length === 0) {
+              statusEl.innerText = "VICTORY!";
+              gameOver();
+            }
+          }
+        });
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Зірки (фон)
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < 20; i++) ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 1, 1);
+
+      player.draw();
+      invaders.forEach(inv => inv.draw());
+      bullets.forEach(b => b.draw());
+      enemyBullets.forEach(b => b.draw());
+    }
+
+    function gameLoop() {
+      update();
+      draw();
+      if (gameActive) requestAnimationFrame(gameLoop);
+    }
+
+    function gameOver() {
+      gameActive = false;
+      overlay.style.display = 'flex';
+      finalScoreEl.innerText = score;
+      if (score > highscore) {
+        highscore = score;
+        localStorage.setItem('invaders_highscore', highscore);
+        highscoreEl.innerText = highscore;
+      }
+    }
+
+    function restart() {
+      score = 0;
+      lives = 3;
+      invaderSpeed = 1;
+      scoreEl.innerText = score;
+      livesEl.innerText = lives;
+      bullets = [];
+      enemyBullets = [];
+      gameActive = true;
+      overlay.style.display = 'none';
+      initInvaders();
+      gameLoop();
+    }
+
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      if (e.key === ' ' && gameActive) {
+        if (bullets.length < 3) {
+          bullets.push(new Bullet(player.x + player.w / 2 - 1.5, player.y, -7, '#0f0'));
+          playSound(600, 'sine', 0.1);
+        }
+      }
+      if (e.key === 'Enter' && !gameActive) restart();
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    initInvaders();
+    gameLoop();
+  </script>
+</body>
+
+</html>
